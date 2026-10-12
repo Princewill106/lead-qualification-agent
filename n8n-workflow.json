@@ -1,0 +1,354 @@
+{
+  "name": "Lead Qualification Agent (AI Automation Projects #9)",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Tell us about your project",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Source"
+            },
+            {
+              "fieldLabel": "Message",
+              "fieldType": "textarea",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee89c709-9267-5be2-a1bd-c43c7da3ba0b",
+      "name": "Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7485cf02-250f-535e-8c5c-d93b893fec5e"
+    },
+    {
+      "parameters": {},
+      "id": "bcdadf40-c385-59fb-a5fa-514553b148c5",
+      "name": "Test with sample data",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sample data from this repo. Click 'Test workflow' to run the whole flow on it.\nconst sample = [\n {\n  \"Name\": \"Bola Adeniran\",\n  \"Email\": \"bola@example.com\",\n  \"Source\": \"website\",\n  \"Message\": \"I'm the founder of a logistics company. We need to automate our dispatch notifications on WhatsApp ASAP. Budget around 1.5m.\"\n },\n {\n  \"Name\": \"Ifeoma Chukwu\",\n  \"Email\": \"ifeoma@example.com\",\n  \"Source\": \"instagram\",\n  \"Message\": \"Hi, do you do AI training? Just browsing for now, maybe next year.\"\n },\n {\n  \"Name\": \"Samuel Okon\",\n  \"Email\": \"samuel@example.com\",\n  \"Source\": \"whatsapp\",\n  \"Message\": \"Head of operations at a school group. We want staff training on AI and automating admissions workflow this month. Budget NGN 800,000.\"\n },\n {\n  \"Name\": \"Halima Yusuf\",\n  \"Email\": \"halima@example.com\",\n  \"Source\": \"website\",\n  \"Message\": \"How much does a chatbot cost?\"\n },\n {\n  \"Name\": \"Daniel Ojo\",\n  \"Email\": \"daniel@example.com\",\n  \"Source\": \"linkedin\",\n  \"Message\": \"Manager at a clinic. We need a CRM automation, maybe 200k budget, no rush.\"\n }\n];\nreturn sample.map(json => ({ json }));"
+      },
+      "id": "e581c780-d2b0-5145-8abb-64e940cb3532",
+      "name": "Sample data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lead Qualification Agent: core logic (ported from main.py)\n\n// ---- input normaliser (works for Webhook, Form, WhatsApp, Gmail, Sheets and sample data)\nconst input = $input.all().flatMap(i => {\n  const j = i.json || {};\n  if (j.messages && Array.isArray(j.messages)) {           // WhatsApp Trigger\n    return j.messages.filter(m => m.text).map(m => ({ from: '+' + m.from, text: m.text.body }));\n  }\n  if (j.Subject !== undefined || j.From !== undefined) {     // Gmail Trigger (simple)\n    return [{ from: (j.From || '').replace(/.*<|>.*/g, ''), subject: j.Subject || '', body: j.snippet || j.text || '' }];\n  }\n  const b = (j.body !== undefined && j.headers !== undefined) ? j.body : j;   // Webhook wraps payload in body\n  if (Array.isArray(b)) return b;\n  if (b && Array.isArray(b.items)) return b.items;\n  return [b];\n});\n\nconst MIN_BUDGET = 300000;\nconst SENIOR = ['ceo', 'founder', 'director', 'owner', 'head of', 'md', 'manager', 'principal', 'proprietor'];\nconst NEED = ['automate', 'automation', 'chatbot', 'training', 'workflow', 'ai', 'crm', 'save time', 'whatsapp'];\nconst URGENT = ['asap', 'urgent', 'this week', 'this month', 'immediately', 'next week'], LATER = ['next year', 'someday', 'just browsing', 'maybe later', 'no rush'];\nconst budgetOf = t => { let best = 0; const re = /(?:ngn|₦)?\\s?(\\d[\\d,.]*)\\s?(k|m|million)?\\b/g; let m;\n  while ((m = re.exec(t.toLowerCase()))) { let n = Number(m[1].replace(/,/g, '')); n *= m[2] === 'k' ? 1e3 : (m[2] === 'm' || m[2] === 'million') ? 1e6 : 1; best = Math.max(best, n); }\n  return best || null; };\nconst out = [];\nfor (const l of input) {\n  const msg = l.Message || l.message || '', t = msg.toLowerCase(), name = l.Name || l.name || '';\n  const b = budgetOf(msg), senior = SENIOR.find(w => t.includes(w)), needs = NEED.filter(w => new RegExp('\\\\b' + w + '\\\\b').test(t));\n  const s = { budget: b && b >= MIN_BUDGET ? 25 : b ? 10 : 5, authority: senior ? 25 : 8, need: Math.min(25, 10 * needs.length),\n              timeline: URGENT.some(w => t.includes(w)) ? 25 : LATER.some(w => t.includes(w)) ? 0 : 12 };\n  const total = Object.values(s).reduce((a, x) => a + x, 0);\n  const tier = total >= 70 ? 'HOT' : total >= 45 ? 'WARM' : 'COLD', first = name.split(' ')[0];\n  const reply = { HOT: `Hi ${first}, thanks for reaching out. I can help with this. Are you free for a 20-minute call today or tomorrow?`,\n    WARM: `Hi ${first}, thanks for your message. Could you share your timeline and the process you want to automate?`,\n    COLD: `Hi ${first}, thanks for getting in touch! Here's a short guide on where AI automation saves businesses time. Happy to chat whenever you're ready.` }[tier];\n  out.push({ route: tier, name, email: l.Email || l.email, source: l.Source || l.source || 'form', score: total, tier,\n             budget: b, authority: senior || '', need: needs.join(', '), message: msg, reply });\n}\nreturn out.map(json => ({ json }));\n"
+      },
+      "id": "50b5b6c0-a642-547b-a98e-fb0a8fa88e84",
+      "name": "Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "32bcc7f9-41ef-5210-a09c-8fb29b1e6d24",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "HOT",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "HOT"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "69e48e6e-c3e9-5b74-9e7f-4bc50c4431f4",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "WARM",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "WARM"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "810019c4-46e1-5769-9480-cb7d86c4df6a",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "COLD",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "COLD"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d0a7c67c-50a2-5f4f-adea-10aa121895e0",
+      "name": "Route",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        720,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#leads",
+          "mode": "name"
+        },
+        "text": "=HOT lead {{ $json.name }} ({{ $json.score }}/100): {{ $json.message }}",
+        "otherOptions": {}
+      },
+      "id": "08c97b7b-12b3-5aa6-a889-a6d923e2b509",
+      "name": "Ping me: hot lead (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        980,
+        -150
+      ],
+      "webhookId": "08c97b7b-12b3-5aa6-a889-a6d923e2b509"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Your enquiry",
+        "emailType": "text",
+        "message": "={{ $json.reply }}",
+        "options": {}
+      },
+      "id": "d97f6b37-5d00-5b26-88ea-0af538d98d8f",
+      "name": "Email hot lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        980,
+        30
+      ],
+      "webhookId": "d97f6b37-5d00-5b26-88ea-0af538d98d8f"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Your enquiry",
+        "emailType": "text",
+        "message": "={{ $json.reply }}",
+        "options": {}
+      },
+      "id": "05302237-fc8a-54e2-80c4-f7e06b5002fa",
+      "name": "Email warm lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        980,
+        210
+      ],
+      "webhookId": "05302237-fc8a-54e2-80c4-f7e06b5002fa"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "5634c882-c9b9-508d-b961-7fadfb05354c",
+      "name": "Add cold lead to nurture sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        980,
+        390
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Lead Qualification Agent\nScore every inbound lead on budget, authority, need and timing, then route it before it goes cold.\n\nA hosted n8n form collects enquiries. Each lead is scored on budget, authority, need and timeline (0-100). Hot leads ping you on Slack immediately and get a call offer by email; warm and cold leads get the right first reply. Every lead is logged.\n\n**Try it:** click *Test workflow* to run on the sample data. Then connect your credentials on the output nodes and activate.\n\nCode and docs: github.com/Princewill106/lead-qualification-agent",
+        "height": 340,
+        "width": 420,
+        "color": 5
+      },
+      "id": "7b82ece0-665a-59dd-a20a-40dd7c6c6225",
+      "name": "About this workflow",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -460
+      ]
+    }
+  ],
+  "connections": {
+    "Test with sample data": {
+      "main": [
+        [
+          {
+            "node": "Sample data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample data": {
+      "main": [
+        [
+          {
+            "node": "Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logic": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Ping me: hot lead (Slack)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email hot lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email warm lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add cold lead to nurture sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
